@@ -6,8 +6,34 @@ setopt localoptions NO_shwordsplit
 
 [[ $1 == '--flavours' ]] && { print -l git-p4 git-svn; return 0 }
 
-if VCS_INFO_check_com ${vcs_comm[cmd]} && ${vcs_comm[cmd]} rev-parse --is-inside-work-tree &> /dev/null ; then
-    vcs_comm[gitdir]="$(${vcs_comm[cmd]} rev-parse --git-dir 2> /dev/null)" || return 1
+# Bootstrap functions not in old vcs_info statics
+(( ${+functions[VCS_INFO_patch2subject]} )) || autoload -Uz VCS_INFO_patch2subject
+(( ${+functions[VCS_INFO_set-patch-format]} )) || autoload -Uz VCS_INFO_set-patch-format
+
+if VCS_INFO_check_com ${vcs_comm[cmd]} ; then
+
+    local repo_info="$(command ${vcs_comm[cmd]} rev-parse --verify --git-dir --is-inside-git-dir --is-bare-repository --is-inside-work-tree --show-toplevel --short=7 HEAD 2>/dev/null)"
+    local rev_parse_exit_code="$?"
+    [[ -z "$repo_info" ]] && return 1
+
+    local short_sha=""
+    if [[ "$rev_parse_exit_code" = "0" ]]; then
+        vcs_comm[gitsha1]="${repo_info##*$'\n'}"
+        repo_info="${repo_info%$'\n'*}"
+    fi
+    # vcs_comm[gitsha1]="$short_sha"
+    vcs_comm[gitbase]="${repo_info##*$'\n'}"
+    repo_info="${repo_info%$'\n'*}"
+    vcs_comm[inside_worktree]="${repo_info##*$'\n'}"
+    repo_info="${repo_info%$'\n'*}"
+    local bare_repo="${repo_info##*$'\n'}"
+    repo_info="${repo_info%$'\n'*}"
+    local inside_gitdir="${repo_info##*$'\n'}"
+    vcs_comm[gitdir]="${repo_info%$'\n'*}"
+
+    # local gitdir
+    # ${vcs_comm[cmd]} rev-parse --git-dir 2> /dev/null | read gitdir || return 1
+    # vcs_comm[gitdir]=$gitdir
     if   [[ -d ${vcs_comm[gitdir]}/svn ]]             ; then vcs_comm[overwrite_name]='git-svn'
     elif [[ -d ${vcs_comm[gitdir]}/refs/remotes/p4 ]] ; then vcs_comm[overwrite_name]='git-p4' ; fi
     return 0

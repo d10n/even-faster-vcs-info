@@ -74,7 +74,12 @@ VCS_INFO_git_getaction () {
 (( ${+functions[VCS_INFO_git_getbranch]} )) ||
 VCS_INFO_git_getbranch () {
     local gitdir=$1 tmp actiondir
-    local gitsymref="${vcs_comm[cmd]} symbolic-ref HEAD"
+    #local gitsymref="${vcs_comm[cmd]} symbolic-ref HEAD"
+    # local gitsymref
+    # IFS='' read -r gitsymref <"${gitdir}/HEAD"
+    # local gitsymref='$(sr="$(<${gitdir}/HEAD)"; [[ $sr = "ref: "* ]] && sr="${sr#ref: }" || sr= ;printf %s "$sr")'
+    local gitsymref="$(<${gitdir}/HEAD)"
+    [[ "$gitsymref" = "ref: "* ]] && gitsymref="${gitsymref#ref: }" ||  gitsymref=
 
     actiondir=''
     for tmp in "${gitdir}/rebase-apply" \
@@ -86,14 +91,14 @@ VCS_INFO_git_getbranch () {
         fi
     done
     if [[ -n ${actiondir} ]]; then
-        gitbranch="$(${(z)gitsymref} 2> /dev/null)"
+        gitbranch="$gitsymref"
         [[ -z ${gitbranch} ]] && [[ -r ${actiondir}/head-name ]] \
             && gitbranch="$(< ${actiondir}/head-name)"
         [[ -z ${gitbranch} || ${gitbranch} == 'detached HEAD' ]] && [[ -r ${actiondir}/onto ]] \
             && gitbranch="$(< ${actiondir}/onto)"
 
     elif [[ -f "${gitdir}/MERGE_HEAD" ]] ; then
-        gitbranch="$(${(z)gitsymref} 2> /dev/null)"
+        gitbranch="$gitsymref"
         [[ -z ${gitbranch} ]] && gitbranch="$(< ${gitdir}/ORIG_HEAD)"
 
     elif [[ -d "${gitdir}/rebase-merge" ]] ; then
@@ -106,17 +111,19 @@ VCS_INFO_git_getbranch () {
     elif [[ -d "${gitdir}/.dotest-merge" ]] ; then
         gitbranch="$(< ${gitdir}/.dotest-merge/head-name)"
 
-    elif gitbranch="$(${(z)gitsymref} 2> /dev/null)" ; then
-    elif gitbranch="refs/tags/$(${vcs_comm[cmd]} describe --all --exact-match HEAD 2>/dev/null)" ; then
-    elif gitbranch="$(${vcs_comm[cmd]} describe --contains HEAD 2>/dev/null)" ; then
-    ## Commented out because we don't know of a case in which 'describe --contains' fails and 'name-rev --tags' succeeds.
-    #elif gitbranch="$(${vcs_comm[cmd]} name-rev --name-only --no-undefined --tags HEAD 2>/dev/null)" ; then
-    elif gitbranch="$(${vcs_comm[cmd]} name-rev --name-only --no-undefined --always HEAD 2>/dev/null)" ; then
-    fi
+    else
+        # echo "$gitsymref"
+        # echo "$(${(z)gitsymref})"
+        gitbranch="$gitsymref"
 
-    if [[ -z ${gitbranch} ]]
-    then
-	gitbranch="${${"$(< $gitdir/HEAD)"}[1,7]}..."
+        if [[ -z $gitbranch ]] ; then
+            gitbranch="refs/tags/$(command ${vcs_comm[cmd]} describe --all --exact-match HEAD 2>/dev/null)"
+
+            if [[ $? -ne 0 ]] ; then
+                # gitbranch="${${"$(< $gitdir/HEAD)"}[1,7]}..."
+                gitbranch="${vcs_comm[gitsha1]}"
+            fi
+        fi
     fi
 
     return 0
@@ -138,13 +145,15 @@ VCS_INFO_git_handle_patches () {
 
 gitdir=${vcs_comm[gitdir]}
 VCS_INFO_git_getbranch ${gitdir}
-gitbase=$( ${vcs_comm[cmd]} rev-parse --show-toplevel )
+# gitbase=$( ${vcs_comm[cmd]} rev-parse --show-toplevel )
+gitbase=${vcs_comm[gitbase]}
 rrn=${gitbase:t}
-if zstyle -t ":vcs_info:${vcs}:${usercontext}:${rrn}" get-revision ; then
-    gitsha1=$(${vcs_comm[cmd]} rev-parse --quiet --verify HEAD)
-else
-    gitsha1=''
-fi
+# if zstyle -t ":vcs_info:${vcs}:${usercontext}:${rrn}" get-revision ; then
+#     gitsha1=$(${vcs_comm[cmd]} rev-parse --quiet --verify HEAD)
+# else
+#     gitsha1=''
+# fi
+gitsha1=${vcs_comm[gitsha1]}
 gitbranch="${gitbranch##refs/[^/]##/}"
 
 if [[ -z ${gitdir} ]] || [[ -z ${gitbranch} ]] ; then
@@ -158,20 +167,20 @@ elif zstyle -t ":vcs_info:${vcs}:${usercontext}:${rrn}" "check-for-staged-change
     querystaged=1
 fi
 if (( querystaged || queryunstaged )) && \
-   [[ "$(${vcs_comm[cmd]} rev-parse --is-inside-work-tree 2> /dev/null)" == 'true' ]] ; then
+   [[ "${vcs_comm[inside_worktree]}" == 'true' ]] ; then
     # Default: off - these are potentially expensive on big repositories
     if (( queryunstaged )) ; then
-        ${vcs_comm[cmd]} diff --no-ext-diff --ignore-submodules=dirty --quiet --exit-code 2> /dev/null ||
+        command ${vcs_comm[cmd]} diff --no-ext-diff --ignore-submodules=dirty --quiet --exit-code 2> /dev/null ||
             gitunstaged=1
     fi
     if (( querystaged )) ; then
-        if ${vcs_comm[cmd]} rev-parse --quiet --verify HEAD &> /dev/null ; then
-            ${vcs_comm[cmd]} diff-index --cached --quiet --ignore-submodules=dirty HEAD 2> /dev/null
+        if (( ${+vcs_comm[gitsha1]} )) ; then
+            command ${vcs_comm[cmd]} diff-index --cached --quiet --ignore-submodules=dirty HEAD 2> /dev/null
             (( $? && $? != 128 )) && gitstaged=1
         else
             # empty repository (no commits yet)
             # 4b825dc642cb6eb9a060e54bf8d69288fbee4904 is the git empty tree.
-            ${vcs_comm[cmd]} diff-index --cached --quiet --ignore-submodules=dirty 4b825dc642cb6eb9a060e54bf8d69288fbee4904 2>/dev/null
+            command ${vcs_comm[cmd]} diff-index --cached --quiet --ignore-submodules=dirty 4b825dc642cb6eb9a060e54bf8d69288fbee4904 2>/dev/null
             (( $? && $? != 128 )) && gitstaged=1
         fi
     fi
@@ -249,12 +258,14 @@ elif [[ -d "${gitdir}/rebase-apply" ]]; then
         local p subject
         # Fake patch names for all but current patch
         for ((p = 1; p < cur; p++)); do
-            printf -v "git_patches_applied[$p]"  "%04d ?" "$p"
+            # printf -v "git_patches_applied[$p]"  "%04d ?" "$p" # printf -v not supported until zsh 5.3
+            git_patches_applied[$p]="$(printf "%04d ?" "$p")"
         done
         if [[ -f "${patchdir}/msg-clean" ]]; then
             subject="${$(< "${patchdir}/msg-clean")[(f)1]}"
         elif local this_patch_file
-             printf -v this_patch_file "%s/%04d" "${patchdir}" "${cur}"
+             # printf -v this_patch_file "%s/%04d" "${patchdir}" "${cur}" # printf -v not supported until zsh 5.3
+             this_patch_file="$(printf "%s/%04d" "${patchdir}" "${cur}")"
              [[ -f $this_patch_file ]]
         then
             () {
